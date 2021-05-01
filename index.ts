@@ -66,7 +66,7 @@ export default class Dynamocsv {
   /**
    * @param ExclusiveStartKey
    */
-  async queryDb(
+  async exec(
     ExclusiveStartKey?: ScanCommandInput['ExclusiveStartKey'] | QueryInput['ExclusiveStartKey'],
   ): Promise<void> {
     let result;
@@ -95,7 +95,7 @@ export default class Dynamocsv {
       this.writeToTarget();
 
       if (result && result.LastEvaluatedKey) {
-        await this.queryDb(result.LastEvaluatedKey);
+        await this.exec(result.LastEvaluatedKey);
       }
     }
   }
