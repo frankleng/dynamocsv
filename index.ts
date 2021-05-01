@@ -11,7 +11,7 @@ type Params = {
   client: DynamoDBClient;
   input: {
     tableName: ScanCommandInput['TableName'];
-    index: ScanCommandInput['IndexName'];
+    index?: ScanCommandInput['IndexName'];
     limit?: ScanCommandInput['Limit'];
   };
   query?: {
@@ -40,7 +40,7 @@ export default class Dynamocsv {
     this.targetStream = target instanceof WriteStream ? target : fs.createWriteStream(target, { flags: 'a' });
   }
 
-  writeToTarget(): void {
+  private writeToTarget(): void {
     let endData = csv.unparse({
       fields: [...this.headers],
       data: this.rows,
@@ -59,7 +59,7 @@ export default class Dynamocsv {
     this.rows = [];
   }
 
-  addHeader(header: string): void {
+  private addHeader(header: string): void {
     if (!this.headers.has(header)) this.headers.add(header);
   }
 
@@ -81,9 +81,14 @@ export default class Dynamocsv {
     if (result) {
       this.rows = result.Items
         ? result.Items.map((item) => {
+            const row: { [p: string]: any } = {};
             const data = unmarshall(item);
-            Object.keys(data).forEach(this.addHeader);
-            return data;
+            Object.keys(data).forEach((key) => {
+              this.addHeader(key.trim());
+              const val = data[key];
+              row[key] = typeof val === 'object' ? JSON.stringify(val) : val;
+            });
+            return row;
           })
         : [];
 
