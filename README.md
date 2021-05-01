@@ -1,6 +1,6 @@
 # dynamocsv
 
-###Example
+### Example
 ```javascript
 const service = new ddbCsv({
   client: new DynamoDBClient({}),
@@ -18,7 +18,7 @@ const service = new ddbCsv({
 await service.exec();
 ```
 
-###Args
+### Args
 + *client* - An instance of DynamoDBClient, example uses aws-sdk 3, but v2 should also work
 + *target* - file name with extension, or an instance of Node.js WriteStream.
 + *input*
