@@ -14,23 +14,25 @@ type Params = {
     index?: ScanCommandInput['IndexName'];
     limit?: ScanCommandInput['Limit'];
   };
+  target: string | WriteStream;
   query?: {
     keyCondExpressionMap?: KeyCondExpressionMap;
     filterExpressionMap?: FilterExpressionMap;
   };
-  target: string | WriteStream;
+  rowPredicate?: (data: any, context: Dynamocsv) => any;
 };
 
 export default class Dynamocsv {
   private readonly input: Params['input'];
   private readonly query: Params['query'];
+  private readonly targetStream: WriteStream;
+  private readonly rowPredicate: ((data: any, context: Dynamocsv) => any) | undefined;
   private client: DynamoDBClient;
   private writeCount: number;
-  private readonly targetStream: WriteStream;
-  private readonly headers: Set<string>;
+  private headers: Set<string>;
   private rows: any[];
 
-  constructor({ client, target, input, query }: Params) {
+  constructor({ client, target, input, query, rowPredicate }: Params) {
     this.client = client;
     this.input = { ...input, limit: input.limit || DEFAULT_QUERY_LIMIT };
     this.query = query;
@@ -38,11 +40,12 @@ export default class Dynamocsv {
     this.headers = new Set();
     this.rows = [];
     this.targetStream = target instanceof WriteStream ? target : fs.createWriteStream(target, { flags: 'a' });
+    this.rowPredicate = rowPredicate;
   }
 
   private writeToTarget(): void {
     let endData = csv.unparse({
-      fields: [...this.headers],
+      fields: [...this.headers.values()],
       data: this.rows,
     });
 
@@ -59,8 +62,14 @@ export default class Dynamocsv {
     this.rows = [];
   }
 
-  private addHeader(header: string): void {
+  appendHeader(header: string): Set<string> {
     if (!this.headers.has(header)) this.headers.add(header);
+    return this.headers;
+  }
+
+  prependHeader(header: string): Set<string> {
+    if (!this.headers.has(header)) this.headers = new Set([header, ...this.headers]);
+    return this.headers;
   }
 
   /**
@@ -82,13 +91,13 @@ export default class Dynamocsv {
       this.rows = result.Items
         ? result.Items.map((item) => {
             const row: { [p: string]: any } = {};
-            const data = unmarshall(item);
-            Object.keys(data).forEach((key) => {
-              this.addHeader(key.trim());
-              const val = data[key];
-              row[key] = typeof val === 'object' ? JSON.stringify(val) : val;
+            const cols = unmarshall(item);
+            Object.keys(cols).forEach((header) => {
+              this.appendHeader(header.trim());
+              const val = cols[header];
+              row[header] = typeof val === 'object' ? JSON.stringify(val) : val;
             });
-            return row;
+            return this.rowPredicate ? this.rowPredicate(row, this) : row;
           })
         : [];
 
