@@ -1,9 +1,12 @@
 {
   "name": "dynamocsv",
-  "version": "1.0.3",
+  "version": "1.1.1",
   "description": "Export result of dynamodb scans and queries to Node stream",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "dist/dynamocsv.js",
+  "typings": "dist/types/dynamocsv.d.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "prepare": "tsc",
@@ -45,7 +48,7 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.13.1",
     "@aws-sdk/util-dynamodb": "^3.13.1",
-    "dynadash": "^1.0.5",
+    "dynadash": "^1.1.0",
     "papaparse": "^5.3.0"
   }
 }
