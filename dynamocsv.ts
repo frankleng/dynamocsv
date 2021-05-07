@@ -4,8 +4,12 @@ import { FilterExpressionMap, KeyCondExpressionMap, queryTableIndex } from 'dyna
 import csv from 'papaparse';
 import { WriteStream } from 'fs';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
+import WritableStream = NodeJS.WritableStream;
+import { Writable } from 'stream';
 
 const DEFAULT_QUERY_LIMIT = 2000;
+
+type TargetCallback = (rows: string | any[]) => Promise<any>;
 
 type Params = {
   client: DynamoDBClient;
@@ -14,7 +18,8 @@ type Params = {
     index?: ScanCommandInput['IndexName'];
     limit?: ScanCommandInput['Limit'];
   };
-  target: string | WriteStream;
+  target: string | WritableStream | TargetCallback;
+  format?: 'csv' | 'json' | 'object';
   query?: {
     keyCondExpressionMap?: KeyCondExpressionMap;
     filterExpressionMap?: FilterExpressionMap;
@@ -25,39 +30,55 @@ type Params = {
 export default class Dynamocsv {
   private readonly input: Params['input'];
   private readonly query: Params['query'];
-  private readonly targetStream: WriteStream;
-  private readonly rowPredicate: ((data: any, context: Dynamocsv) => any) | undefined;
+  private readonly targetStream?: WritableStream;
+  private readonly targetCallback?: TargetCallback;
+  private readonly rowPredicate: Params['rowPredicate'];
+  private readonly format: Params['format'];
   private client: DynamoDBClient;
   private writeCount: number;
   private headers: Set<string>;
   private rows: any[];
 
-  constructor({ client, target, input, query, rowPredicate }: Params) {
+  constructor({ client, target, input, query, rowPredicate, format }: Params) {
     this.client = client;
     this.input = { ...input, limit: input.limit || DEFAULT_QUERY_LIMIT };
     this.query = query;
     this.writeCount = 0;
     this.headers = new Set();
     this.rows = [];
-    this.targetStream = target instanceof WriteStream ? target : fs.createWriteStream(target, { flags: 'a' });
     this.rowPredicate = rowPredicate;
+    this.format = format || 'csv';
+
+    if (typeof target === 'string') this.targetStream = fs.createWriteStream(target, { flags: 'a' });
+    else if (target instanceof WriteStream || target instanceof Writable) this.targetStream = target;
+    else if (typeof target === 'function') {
+      this.targetStream = undefined;
+      this.targetCallback = target;
+    }
   }
 
-  private writeToTarget(): void {
-    let endData = csv.unparse({
-      fields: [...this.headers.values()],
-      data: this.rows,
-    });
-
-    if (this.writeCount > 0) {
-      // remove column names after first write chunk.
-      endData = endData.replace(/(.*\r\n)/, '');
+  private async writeToTarget() {
+    let payload;
+    if (this.format === 'json') {
+      payload = JSON.stringify(this.rows);
+    }
+    if (this.format === 'object') {
+      payload = this.rows;
+    } else if (this.format === 'csv') {
+      let csvData = csv.unparse({
+        fields: [...this.headers.values()],
+        data: this.rows,
+      });
+      if (this.writeCount > 0) {
+        // remove column names after first write chunk.
+        csvData = csvData.replace(/(.*\r\n)/, '');
+      }
+      payload = csvData;
     }
 
-    if (this.targetStream) {
-      this.targetStream.write(endData);
-    }
-    // reset write array. saves memory
+    if (this.targetStream) (this.targetStream as WriteStream).write(payload);
+    if (this.targetCallback && payload) await this.targetCallback(payload);
+
     this.writeCount += this.rows.length;
     this.rows = [];
   }
@@ -71,6 +92,10 @@ export default class Dynamocsv {
     if (!this.headers.has(header)) this.headers = new Set([header, ...this.headers]);
     return this.headers;
   }
+
+  applyRowPredicate = (row: any) => {
+    return this.rowPredicate ? this.rowPredicate(row, this) : row;
+  };
 
   /**
    * @param ExclusiveStartKey
@@ -90,18 +115,20 @@ export default class Dynamocsv {
     if (result) {
       this.rows = result.Items
         ? result.Items.map((item) => {
-            const row: { [p: string]: any } = {};
             const cols = unmarshall(item);
+            if (this.format !== 'csv') return this.applyRowPredicate(cols);
+
+            const row: { [p: string]: any } = {};
             Object.keys(cols).forEach((header) => {
               this.appendHeader(header.trim());
               const val = cols[header];
               row[header] = typeof val === 'object' ? JSON.stringify(val) : val;
             });
-            return this.rowPredicate ? this.rowPredicate(row, this) : row;
+            return this.applyRowPredicate(row);
           })
         : [];
 
-      this.writeToTarget();
+      await this.writeToTarget();
 
       if (result && result.LastEvaluatedKey) {
         await this.exec(result.LastEvaluatedKey);
