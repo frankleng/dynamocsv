@@ -9,7 +9,7 @@ import { Writable } from 'stream';
 
 const DEFAULT_QUERY_LIMIT = 2000;
 
-type TargetCallback = (rows: string | any[]) => void;
+type TargetCallback = (rows: string | any[]) => Promise<any>;
 
 type Params = {
   client: DynamoDBClient;
@@ -57,7 +57,7 @@ export default class Dynamocsv {
     }
   }
 
-  private writeToTarget(): void {
+  private async writeToTarget() {
     let payload;
     if (this.format === 'json') {
       payload = JSON.stringify(this.rows);
@@ -77,7 +77,7 @@ export default class Dynamocsv {
     }
 
     if (this.targetStream) (this.targetStream as WriteStream).write(payload);
-    if (this.targetCallback && payload) this.targetCallback(payload);
+    if (this.targetCallback && payload) await this.targetCallback(payload);
 
     this.writeCount += this.rows.length;
     this.rows = [];
@@ -92,6 +92,10 @@ export default class Dynamocsv {
     if (!this.headers.has(header)) this.headers = new Set([header, ...this.headers]);
     return this.headers;
   }
+
+  applyRowPredicate = (row: any) => {
+    return this.rowPredicate ? this.rowPredicate(row, this) : row;
+  };
 
   /**
    * @param ExclusiveStartKey
@@ -112,7 +116,7 @@ export default class Dynamocsv {
       this.rows = result.Items
         ? result.Items.map((item) => {
             const cols = unmarshall(item);
-            if (this.format === 'json') return cols;
+            if (this.format !== 'csv') return this.applyRowPredicate(cols);
 
             const row: { [p: string]: any } = {};
             Object.keys(cols).forEach((header) => {
@@ -120,11 +124,11 @@ export default class Dynamocsv {
               const val = cols[header];
               row[header] = typeof val === 'object' ? JSON.stringify(val) : val;
             });
-            return this.rowPredicate ? this.rowPredicate(row, this) : row;
+            return this.applyRowPredicate(row);
           })
         : [];
 
-      this.writeToTarget();
+      await this.writeToTarget();
 
       if (result && result.LastEvaluatedKey) {
         await this.exec(result.LastEvaluatedKey);

@@ -1,6 +1,6 @@
 {
   "name": "dynamocsv",
-  "version": "1.1.1",
+  "version": "1.2.1",
   "description": "Export result of dynamodb scans and queries to Node stream",
   "main": "dist/dynamocsv.js",
   "typings": "dist/types/dynamocsv.d.ts",
