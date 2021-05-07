@@ -93,7 +93,7 @@ export default class Dynamocsv {
     return this.headers;
   }
 
-  applyRowPredicate = (row: any) => {
+  private applyRowPredicate = (row: any) => {
     return this.rowPredicate ? this.rowPredicate(row, this) : row;
   };
 
